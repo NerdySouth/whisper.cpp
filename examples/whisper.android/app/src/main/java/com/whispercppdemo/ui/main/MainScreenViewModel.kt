@@ -16,11 +16,12 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.whispercppdemo.media.decodeWaveFile
 import com.whispercppdemo.recorder.Recorder
 import com.whispercpp.whisper.WhisperContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.io.File
+import java.util.concurrent.ConcurrentLinkedQueue
 
 private const val LOG_TAG = "MainScreenViewModel"
 
@@ -31,18 +32,57 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         private set
     var isRecording by mutableStateOf(false)
         private set
+    var threadCount by mutableStateOf(4)
+        private set
 
     private val modelsPath = File(application.filesDir, "models")
     private val samplesPath = File(application.filesDir, "samples")
-    private var recorder: Recorder = Recorder()
-    private var whisperContext: com.whispercpp.whisper.WhisperContext? = null
+    private val recorder: Recorder = Recorder()
+    private var whisperContext: WhisperContext? = null
     private var mediaPlayer: MediaPlayer? = null
     private var recordedFile: File? = null
+    
+    // Queue for audio chunks to be transcribed
+    private val transcriptionQueue = ConcurrentLinkedQueue<ShortArray>()
+    private val transcriptionJob = Job()
+    private val transcriptionScope = CoroutineScope(Dispatchers.Default + transcriptionJob)
 
     init {
         viewModelScope.launch {
             printSystemInfo()
             loadData()
+            startTranscriptionWorker()
+        }
+    }
+
+    private fun startTranscriptionWorker() {
+        transcriptionScope.launch {
+            while (isActive) {
+                val chunk = transcriptionQueue.poll()
+                if (chunk != null && canTranscribe) {
+                    try {
+                        // Ensure thread count is set before each transcription
+                        whisperContext?.setThreadCount(threadCount)
+                        
+                        val floatData = FloatArray(chunk.size) { index ->
+                            (chunk[index] / 32767.0f).coerceIn(-1f..1f)
+                        }
+                        val text = whisperContext?.transcribeData(floatData)
+                        if (!text.isNullOrEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                printMessage("Chunk transcription (${threadCount} threads): $text\n")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(LOG_TAG, "Error transcribing chunk", e)
+                        withContext(Dispatchers.Main) {
+                            printMessage("Error transcribing chunk: ${e.localizedMessage}\n")
+                        }
+                    }
+                } else {
+                    delay(100) // Avoid busy waiting
+                }
+            }
         }
     }
 
@@ -87,7 +127,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun benchmark() = viewModelScope.launch {
-        runBenchmark(6)
+        runBenchmark(threadCount)
     }
 
     fun transcribeSample() = viewModelScope.launch {
@@ -141,7 +181,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             printMessage("Reading wave samples... ")
             val data = readAudioSamples(file)
             printMessage("${data.size / (16000 / 1000)} ms\n")
-            printMessage("Transcribing data...\n")
+            printMessage("Transcribing data with $threadCount threads...\n")
             val start = System.currentTimeMillis()
             val text = whisperContext?.transcribeData(data)
             val elapsed = System.currentTimeMillis() - start
@@ -159,18 +199,23 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             if (isRecording) {
                 recorder.stopRecording()
                 isRecording = false
-                recordedFile?.let { transcribeAudio(it) }
             } else {
                 stopPlayback()
                 val file = getTempFileForRecording()
-                recorder.startRecording(file) { e ->
-                    viewModelScope.launch {
-                        withContext(Dispatchers.Main) {
-                            printMessage("${e.localizedMessage}\n")
-                            isRecording = false
+                recorder.startRecording(
+                    file,
+                    onError = { e ->
+                        viewModelScope.launch {
+                            withContext(Dispatchers.Main) {
+                                printMessage("${e.localizedMessage}\n")
+                                isRecording = false
+                            }
                         }
+                    },
+                    onChunkAvailable = { chunk ->
+                        transcriptionQueue.offer(chunk)
                     }
-                }
+                )
                 isRecording = true
                 recordedFile = file
             }
@@ -185,7 +230,13 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         File.createTempFile("recording", "wav")
     }
 
+    fun updateThreadCount(count: Int) {
+        threadCount = count
+        whisperContext?.setThreadCount(count)
+    }
+
     override fun onCleared() {
+        transcriptionJob.cancel()
         runBlocking {
             whisperContext?.release()
             whisperContext = null

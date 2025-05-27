@@ -18,8 +18,12 @@ class Recorder {
     )
     private var recorder: AudioRecordThread? = null
 
-    suspend fun startRecording(outputFile: File, onError: (Exception) -> Unit) = withContext(scope.coroutineContext) {
-        recorder = AudioRecordThread(outputFile, onError)
+    suspend fun startRecording(
+        outputFile: File,
+        onError: (Exception) -> Unit,
+        onChunkAvailable: (ShortArray) -> Unit
+    ) = withContext(scope.coroutineContext) {
+        recorder = AudioRecordThread(outputFile, onError, onChunkAvailable)
         recorder?.start()
     }
 
@@ -33,16 +37,19 @@ class Recorder {
 
 private class AudioRecordThread(
     private val outputFile: File,
-    private val onError: (Exception) -> Unit
-) :
-    Thread("AudioRecorder") {
+    private val onError: (Exception) -> Unit,
+    private val onChunkAvailable: (ShortArray) -> Unit
+) : Thread("AudioRecorder") {
     private var quit = AtomicBoolean(false)
+    private val sampleRate = 16000
+    private val chunkDurationMs = 2000 // 2 seconds
+    private val samplesPerChunk = (sampleRate * chunkDurationMs) / 1000
 
     @SuppressLint("MissingPermission")
     override fun run() {
         try {
             val bufferSize = AudioRecord.getMinBufferSize(
-                16000,
+                sampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT
             ) * 4
@@ -50,7 +57,7 @@ private class AudioRecordThread(
 
             val audioRecord = AudioRecord(
                 MediaRecorder.AudioSource.MIC,
-                16000,
+                sampleRate,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
                 bufferSize
@@ -60,16 +67,30 @@ private class AudioRecordThread(
                 audioRecord.startRecording()
 
                 val allData = mutableListOf<Short>()
+                val chunkBuffer = mutableListOf<Short>()
 
                 while (!quit.get()) {
                     val read = audioRecord.read(buffer, 0, buffer.size)
                     if (read > 0) {
                         for (i in 0 until read) {
-                            allData.add(buffer[i])
+                            val sample = buffer[i]
+                            allData.add(sample)
+                            chunkBuffer.add(sample)
+
+                            // If we have enough samples for a chunk, process it
+                            if (chunkBuffer.size >= samplesPerChunk) {
+                                onChunkAvailable(chunkBuffer.toShortArray())
+                                chunkBuffer.clear()
+                            }
                         }
                     } else {
                         throw java.lang.RuntimeException("audioRecord.read returned $read")
                     }
+                }
+
+                // Process any remaining samples in the last chunk
+                if (chunkBuffer.isNotEmpty()) {
+                    onChunkAvailable(chunkBuffer.toShortArray())
                 }
 
                 audioRecord.stop()

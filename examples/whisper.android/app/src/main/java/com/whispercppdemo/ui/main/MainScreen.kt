@@ -20,9 +20,11 @@ fun MainScreen(viewModel: MainScreenViewModel) {
         canTranscribe = viewModel.canTranscribe,
         isRecording = viewModel.isRecording,
         messageLog = viewModel.dataLog,
+        threadCount = viewModel.threadCount,
         onBenchmarkTapped = viewModel::benchmark,
         onTranscribeSampleTapped = viewModel::transcribeSample,
-        onRecordTapped = viewModel::toggleRecord
+        onRecordTapped = viewModel::toggleRecord,
+        onThreadCountChanged = viewModel::updateThreadCount
     )
 }
 
@@ -32,9 +34,11 @@ private fun MainScreen(
     canTranscribe: Boolean,
     isRecording: Boolean,
     messageLog: String,
+    threadCount: Int,
     onBenchmarkTapped: () -> Unit,
     onTranscribeSampleTapped: () -> Unit,
-    onRecordTapped: () -> Unit
+    onRecordTapped: () -> Unit,
+    onThreadCountChanged: (Int) -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -53,6 +57,10 @@ private fun MainScreen(
                     BenchmarkButton(enabled = canTranscribe, onClick = onBenchmarkTapped)
                     TranscribeSampleButton(enabled = canTranscribe, onClick = onTranscribeSampleTapped)
                 }
+                ThreadControlButtons(
+                    currentThreadCount = threadCount,
+                    onThreadCountChanged = onThreadCountChanged
+                )
                 RecordButton(
                     enabled = canTranscribe,
                     isRecording = isRecording,
@@ -110,5 +118,42 @@ private fun RecordButton(enabled: Boolean, isRecording: Boolean, onClick: () -> 
                 "Start recording"
             }
         )
+    }
+}
+
+@Composable
+private fun ThreadControlButtons(
+    currentThreadCount: Int,
+    onThreadCountChanged: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        Text(
+            text = "Thread Count:",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            listOf(2, 4, 6, 8).forEach { threadCount ->
+                Button(
+                    onClick = { onThreadCountChanged(threadCount) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (threadCount == currentThreadCount) 
+                            MaterialTheme.colorScheme.primary 
+                        else 
+                            MaterialTheme.colorScheme.secondary
+                    ),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("$threadCount")
+                }
+            }
+        }
     }
 }
