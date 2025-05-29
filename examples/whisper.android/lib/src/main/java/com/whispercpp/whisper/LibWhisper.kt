@@ -24,10 +24,16 @@ class WhisperContext private constructor(private var ptr: Long) {
 
     suspend fun transcribeData(data: FloatArray, printTimestamp: Boolean = true): String = withContext(scope.coroutineContext) {
         require(ptr != 0L)
-        Log.d(LOG_TAG, "Using $numThreads threads")
+        Log.d(LOG_TAG, "Starting transcription with $numThreads threads, ${data.size} samples")
+        
+        val transcribeStart = System.currentTimeMillis()
         WhisperLib.fullTranscribe(ptr, numThreads, data)
+        val transcribeEnd = System.currentTimeMillis()
+        val transcribeTime = transcribeEnd - transcribeStart
+        
+        val textProcessStart = System.currentTimeMillis()
         val textCount = WhisperLib.getTextSegmentCount(ptr)
-        return@withContext buildString {
+        val result = buildString {
             for (i in 0 until textCount) {
                 if (printTimestamp) {
                     val textTimestamp = "[${toTimestamp(WhisperLib.getTextSegmentT0(ptr, i))} --> ${toTimestamp(WhisperLib.getTextSegmentT1(ptr, i))}]"
@@ -38,6 +44,13 @@ class WhisperContext private constructor(private var ptr: Long) {
                 }
             }
         }
+        val textProcessEnd = System.currentTimeMillis()
+        val textProcessTime = textProcessEnd - textProcessStart
+        val totalTime = textProcessEnd - transcribeStart
+        
+        Log.d(LOG_TAG, "Transcription completed: core=${transcribeTime}ms, text_processing=${textProcessTime}ms, total=${totalTime}ms, segments=$textCount")
+        
+        return@withContext result
     }
 
     suspend fun benchMemory(nthreads: Int): String = withContext(scope.coroutineContext) {

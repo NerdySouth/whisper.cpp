@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.util.Log
 import com.whispercppdemo.media.encodeWaveFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -42,8 +43,14 @@ private class AudioRecordThread(
 ) : Thread("AudioRecorder") {
     private var quit = AtomicBoolean(false)
     private val sampleRate = 16000
-    private val chunkDurationMs = 2000 // 2 seconds
+    private val chunkDurationMs = 5000 // 5 seconds (to match ~5.5s transcription time)
     private val samplesPerChunk = (sampleRate * chunkDurationMs) / 1000
+    private val maxBufferDurationMs = 10000 // 10 seconds max buffer (2 chunk lengths)
+    private val maxBufferSamples = (sampleRate * maxBufferDurationMs) / 1000
+    
+    companion object {
+        private const val TAG = "AudioRecorder"
+    }
 
     @SuppressLint("MissingPermission")
     override fun run() {
@@ -66,7 +73,12 @@ private class AudioRecordThread(
             try {
                 audioRecord.startRecording()
 
-                val allData = mutableListOf<Short>()
+                // Circular buffer for all data with maximum capacity
+                val circularBuffer = ShortArray(maxBufferSamples)
+                var writeIndex = 0
+                var totalSamples = 0
+                var lastOverflowLogTime = 0L
+                val overflowLogIntervalMs = 5000L // Log overflow every 5 seconds
                 val chunkBuffer = mutableListOf<Short>()
 
                 while (!quit.get()) {
@@ -74,7 +86,21 @@ private class AudioRecordThread(
                     if (read > 0) {
                         for (i in 0 until read) {
                             val sample = buffer[i]
-                            allData.add(sample)
+                            
+                            // Check if we're about to start overwriting (buffer is full)
+                            if (totalSamples >= maxBufferSamples) {
+                                val currentTime = System.currentTimeMillis()
+                                if (currentTime - lastOverflowLogTime >= overflowLogIntervalMs) {
+                                    Log.w(TAG, "Audio buffer full (${maxBufferDurationMs}ms), overwriting old data. System is falling behind.")
+                                    lastOverflowLogTime = currentTime
+                                }
+                            }
+                            
+                            // Add to circular buffer
+                            circularBuffer[writeIndex] = sample
+                            writeIndex = (writeIndex + 1) % maxBufferSamples
+                            totalSamples++
+                            
                             chunkBuffer.add(sample)
 
                             // If we have enough samples for a chunk, process it
@@ -94,7 +120,31 @@ private class AudioRecordThread(
                 }
 
                 audioRecord.stop()
-                encodeWaveFile(outputFile, allData.toShortArray())
+                
+                // Log final statistics
+                val samplesLost = if (totalSamples > maxBufferSamples) totalSamples - maxBufferSamples else 0
+                val secondsLost = samplesLost.toFloat() / sampleRate
+                if (samplesLost > 0) {
+                    Log.i(TAG, "Recording completed. Lost ${samplesLost} samples (${String.format("%.2f", secondsLost)}s) due to buffer overflow.")
+                } else {
+                    Log.i(TAG, "Recording completed. No samples lost.")
+                }
+                
+                // Extract data from circular buffer for final encoding
+                val finalData = if (totalSamples <= maxBufferSamples) {
+                    // Buffer never wrapped, use data from start to writeIndex
+                    circularBuffer.sliceArray(0 until writeIndex)
+                } else {
+                    // Buffer wrapped, reconstruct in correct order
+                    val result = ShortArray(maxBufferSamples)
+                    for (i in 0 until maxBufferSamples) {
+                        val readIndex = (writeIndex + i) % maxBufferSamples
+                        result[i] = circularBuffer[readIndex]
+                    }
+                    result
+                }
+                
+                encodeWaveFile(outputFile, finalData)
             } finally {
                 audioRecord.release()
             }

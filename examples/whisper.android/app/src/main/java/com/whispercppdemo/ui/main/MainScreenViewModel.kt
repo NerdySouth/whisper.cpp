@@ -67,11 +67,18 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         val floatData = FloatArray(chunk.size) { index ->
                             (chunk[index] / 32767.0f).coerceIn(-1f..1f)
                         }
+                        
+                        val start = System.currentTimeMillis()
                         val text = whisperContext?.transcribeData(floatData)
+                        val elapsed = System.currentTimeMillis() - start
+                        
                         if (!text.isNullOrEmpty()) {
                             withContext(Dispatchers.Main) {
-                                printMessage("Chunk transcription (${threadCount} threads): $text\n")
+                                printMessage("Chunk transcription (${threadCount} threads, ${elapsed}ms): $text\n")
                             }
+                        } else {
+                            // Log timing even for empty results to track performance
+                            Log.d(LOG_TAG, "Chunk transcription completed in ${elapsed}ms (empty result)")
                         }
                     } catch (e: Exception) {
                         Log.w(LOG_TAG, "Error transcribing chunk", e)
