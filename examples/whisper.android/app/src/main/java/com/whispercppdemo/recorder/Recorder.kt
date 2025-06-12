@@ -43,9 +43,9 @@ private class AudioRecordThread(
 ) : Thread("AudioRecorder") {
     private var quit = AtomicBoolean(false)
     private val sampleRate = 16000
-    private val chunkDurationMs = 5000 // 5 seconds (to match ~5.5s transcription time)
+    private val chunkDurationMs = 4000 // 4.5 seconds (to match transcription time)
     private val samplesPerChunk = (sampleRate * chunkDurationMs) / 1000
-    private val maxBufferDurationMs = 10000 // 10 seconds max buffer (2 chunk lengths)
+    private val maxBufferDurationMs = 6000 // N seconds max buffer (1.5 chunk lengths)
     private val maxBufferSamples = (sampleRate * maxBufferDurationMs) / 1000
     
     companion object {
