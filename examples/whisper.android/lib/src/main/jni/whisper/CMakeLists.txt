@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(WHISPER_LIB_DIR ${CMAKE_SOURCE_DIR}/../../../../../../..)
 
 # Path to external GGML, otherwise uses the copy in whisper.cpp.
-option(GGML_HOME "whisper: Path to external GGML source" OFF)
+option(GGML_HOME "/Users/nerdysouth/Library/Android/sdk/ndk/27.0.12077973/b" ON)
 
 set(
     SOURCE_FILES

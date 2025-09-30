@@ -1,0 +1,33 @@
+// ... existing code ...
+cmake {
+    // When set, builds whisper.android against the version located
+    // at GGML_HOME instead of the copy bundled with whisper.cpp.
+    println "GGML_HOME: ${project.findProperty('GGML_HOME')}"
+    println "GGML_VULKAN: ${project.findProperty('GGML_VULKAN')}"
+    println "GGML_CLBLAST: ${project.findProperty('GGML_CLBLAST')}"
+    if (
+            project.hasProperty('GGML_HOME') &&
+                    project.findProperty('GGML_CLBLAST') == 'ON'
+    ) {
+        // Turning on CLBlast requires GGML_HOME
+        arguments "-DGGML_HOME=${project.property('GGML_HOME')}",
+                "-DGGML_CLBLAST=ON",
+                "-DOPENCL_LIB=${project.property('OPENCL_LIB')}",
+                "-DCLBLAST_HOME=${project.property('CLBLAST_HOME')}",
+                "-DOPENCL_ROOT=${project.property('OPENCL_ROOT')}",
+                "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH",
+                "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH"
+    } else if (
+            project.hasProperty('GGML_HOME') &&
+                    project.findProperty('GGML_VULKAN') == 'ON'
+    ) {
+        // Turning on Vulkan requires GGML_HOME
+        println "Enabling Vulkan support"
+        arguments "-DGGML_HOME=${project.property('GGML_HOME')}",
+                "-DGGML_VULKAN=ON"
+    } else if (project.hasProperty('GGML_HOME')) {
+        arguments "-DGGML_HOME=${project.property('GGML_HOME')}"
+    }
+
+}
+// ... existing code ...
